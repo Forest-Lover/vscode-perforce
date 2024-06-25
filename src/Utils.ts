@@ -69,11 +69,43 @@ export namespace Utils {
         }
     }
 
-    function parseAllLinks(path: string): string {
+    interface CacheEntry {
+        result: string;
+        timestamp: number;
+    }
+    const linkCache = new Map<string, CacheEntry>();
+    const LINK_CACHE_VALIDITY = 10 * 60 * 1000; // 10 minutes
+
+    function isLinkCacheValid(entry: CacheEntry) {
+        return Date.now() - entry.timestamp < LINK_CACHE_VALIDITY;
+    }
+
+    function maintainLinkCache() {
+        if (linkCache.size > 100) {
+            const keys = Array.from(linkCache.keys()).sort((a, b) => {
+                const entryA = linkCache.get(a);
+                const entryB = linkCache.get(b);
+                if (entryA && entryB) {
+                    return entryA.timestamp - entryB.timestamp;
+                }
+                return 0;
+            });
+            for (let i = 0; i < linkCache.size - 100; i++) {
+                linkCache.delete(keys[i]);
+            }
+        }
+    }
+
+    function parseAllLinks(path: string, forceRefresh = false) {
         try {
+            const cacheEntry = linkCache.get(path);
+            if (cacheEntry && isLinkCacheValid(cacheEntry) && !forceRefresh) {
+                return cacheEntry.result;
+            }
+
             let realpath = Fs.realpathSync(path);
             realpath = Path.normalize(realpath);
-            const parts = realpath.split("\\");
+            const parts = realpath.split(Path.sep);
 
             let respath = "";
             for (let i = 0; i < parts.length; ++i) {
@@ -84,6 +116,10 @@ export namespace Utils {
                 }
                 respath = parseLastLink(respath);
             }
+
+            maintainLinkCache();
+            linkCache.set(path, { result: respath, timestamp: Date.now() });
+
             return respath;
         } catch (error) {
             console.error("Error resolving symbolic link or junction: ", error);
